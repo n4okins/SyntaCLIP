@@ -1,0 +1,20 @@
+# python generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# venv
+.venv/
+.vscode/
+wandb/
+ignores/
+models/
+
+*.pth
+
+*.out
+*.log
+.env
