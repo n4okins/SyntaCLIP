@@ -19,7 +19,7 @@ class SyntacticTransformerEncoder(nn.Module):
         self,
         embed_dim: int = 512,
         num_attn_heads: int = 8,
-        num_gate_heads: int = 2,
+        num_gate_heads: int = 8,
         num_induction_layers: int = 2,
         *,
         num_layers: int = 12,
@@ -27,16 +27,7 @@ class SyntacticTransformerEncoder(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_attn_heads
-        self.induction_layers = nn.ModuleList(
-            [
-                ResidualSyntacticAttentionEncoderLayer(
-                    embed_dim=embed_dim,
-                    num_attn_heads=num_attn_heads,
-                    num_gate_heads=num_gate_heads,
-                )
-                for _ in range(num_induction_layers)
-            ]
-        )
+        self.num_induction_layers = num_induction_layers
         self.induction_head = SyntacticDistanceGate(
             embed_dim=embed_dim,
             num_lookback_range=3,
@@ -68,12 +59,16 @@ class SyntacticTransformerEncoder(nn.Module):
     ):
         ret_weights = []
 
-        for induction_layer in self.induction_layers:
-            x, _ = induction_layer(x, attn_mask=attn_mask)
+        for induction_layer in self.res_attn_blocks[: self.num_induction_layers]:
+            x, attn_weight = induction_layer(x, attn_mask=attn_mask)
+            if return_all_weights:
+                ret_weights.append(attn_weight)
 
         attn_gate, distance = self.induction_head(x)
 
-        for i, res_attn_block in enumerate(self.res_attn_blocks):
+        for i, res_attn_block in enumerate(
+            self.res_attn_blocks[self.num_induction_layers :]
+        ):
             x, attn_weight = res_attn_block(
                 x, attn_mask=attn_mask, attn_gate=attn_gate if i == 0 else None
             )
@@ -81,9 +76,9 @@ class SyntacticTransformerEncoder(nn.Module):
                 ret_weights.append(attn_weight)
 
         if return_all_weights and return_distance:
-            return x, torch.stack(ret_weights), distance
+            return x, torch.stack(ret_weights, dim=1), distance
         if return_all_weights:
-            return x, torch.stack(ret_weights)
+            return x, torch.stack(ret_weights, dim=1)
         if return_distance:
             return x, attn_weight.unsqueeze(0), distance
         else:
@@ -95,7 +90,7 @@ class SyntacticTextTransformerEncoder(TextTransformerEncoder):
         self,
         embed_dim: int = 512,
         num_attn_heads: int = 8,
-        num_gate_heads: int = 2,
+        num_gate_heads: int = 8,
         *,
         num_layers: int = 12,
         vocab_size: int = 49408,
@@ -147,7 +142,7 @@ class SyntacticVisionTransformerEncoder(VisionTransformerEncoder):
         self,
         embed_dim: int = 512,
         num_attn_heads: int = 12,
-        num_gate_heads: int = 2,
+        num_gate_heads: int = 12,
         num_layers: int = 12,
         *,
         input_image_size: int | tuple[int, int] | tuple[int, int, int] = 224,
