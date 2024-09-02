@@ -9,11 +9,13 @@ from .multihead_attention import MultiheadAttention
 
 __all__ = ["ResidualAttentionEncoderLayer"]
 
+
 class ResidualAttentionEncoderLayer(nn.Module):
     def __init__(
         self,
         embed_dim: int = 512,
         num_heads: int = 8,
+        dropout_p: float = 0.0,
         *,
         res_mlp_dim: Optional[int] = None,
         res_mlp_activation_module: nn.Module = nn.GELU,
@@ -27,7 +29,10 @@ class ResidualAttentionEncoderLayer(nn.Module):
         self.num_heads = num_heads
         self.layernorm_1 = CastLayerNorm(normalized_shape=embed_dim)
         self.attention = MultiheadAttention(
-            embed_dim=embed_dim, num_heads=num_heads, batch_first=True
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout_p=dropout_p,
         )
         self.layerscale_1 = (
             LayerScale(embed_dim=embed_dim, init_scale_ratio=init_layerscale_ratio)

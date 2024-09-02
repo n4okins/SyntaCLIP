@@ -499,7 +499,7 @@ uri-template==1.3.0
 urllib3==1.26.13
     # via requests
     # via sentry-sdk
-utils @ git+https://github.com/n4okins/utils.git@87dd5f5780089decf1a697deb2225febf5a22697
+utils @ git+https://github.com/n4okins/utils.git@30a9ab8b1920829c2d3cae122750922b4f697a15
 wandb==0.16.6
     # via img2dataset
 wcwidth==0.2.13

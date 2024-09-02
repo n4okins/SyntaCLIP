@@ -186,6 +186,6 @@ model_dir = PROJECT_ROOT / "ignores" / "models" / "openclip_convert"
 model_dir.mkdir(parents=True, exist_ok=True)
 torch.save(
     model.state_dict(),
-    model_dir / "synclip512.pth",
+    model_dir / "syntaclip512.pth",
 )
 # %%

@@ -1,7 +1,10 @@
 # %%
+import argparse
 import os
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import open_clip
@@ -19,20 +22,126 @@ from tqdm.auto import tqdm
 from utils.clogging import getColoredLogger
 from utils.dummy import DummyObject
 from utils.initialize import initializer
+from utils.jupyter import is_jupyter
 
 import syntaclip.nn as synn
 from syntaclip.utils.converter import convert_model_params_laion2b_s34b_b79k_to_CLIP512
-from syntaclip.utils.datasets.cc12m import CC12MDataset
+from syntaclip.utils.datasets import CC3MDataset, CC12MDataset
 
 # Logger Settings
 logger = getColoredLogger(__name__)
-# Project Init
 PROJECT_ROOT = initializer(globals(), logger=logger)
-logger.setLevel("DEBUG")
 
-ARCH_NAME = "CLIP512"
-PROJECT_NAME = f"{ARCH_NAME}-Finetune-Dropout-CC12M"
-USE_WANDB_LOG = True
+
+@dataclass
+class TypedArgs:
+    arch_name: Literal["CLIP512", "SyntaCLIP512"] = "CLIP512"
+    dataset_name: Literal["CC3M", "CC12M"] = "CC3M"
+    use_wandb_log: bool = False
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
+    training_layer_indexes: list[int] = field(default_factory=lambda: [0, 1, 10, 11])
+    attn_dropout_p: float = 0.25
+    gate_dropout_p: float = 0.25
+    learning_rate: float = 1e-4
+    scheduler: Literal["none", "cosine", "plateau"] = "plateau"
+    epochs: int = 30
+    seed: int = 42
+    batch_size: int = 256
+    use_pretrained: bool = True
+
+    @staticmethod
+    def parse() -> "TypedArgs":
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--arch_name",
+            type=str,
+            default="CLIP512",
+            choices=["CLIP512", "SyntaCLIP512"],
+        )
+        parser.add_argument(
+            "--dataset_name",
+            type=str,
+            default="CC3M",
+            choices=["CC3M", "CC12M"],
+        )
+        parser.add_argument(
+            "--use_wandb_log",
+            action="store_true",
+        )
+        parser.add_argument(
+            "--log_level",
+            type=str,
+            default="DEBUG",
+            choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        )
+        parser.add_argument(
+            "--training_layer_indexes",
+            type=lambda x: list(map(int, x.split(","))),
+            default=[0, 1, 10, 11],
+        )
+        parser.add_argument(
+            "--attn_dropout_p",
+            type=float,
+            default=0.25,
+        )
+        parser.add_argument(
+            "--gate_dropout_p",
+            type=float,
+            default=0.25,
+        )
+        parser.add_argument(
+            "--learning_rate",
+            type=float,
+            default=1e-4,
+        )
+        parser.add_argument(
+            "--scheduler",
+            type=str,
+            default="plateau",
+            choices=["none", "cosine", "plateau"],
+        )
+        parser.add_argument(
+            "--epochs",
+            type=int,
+            default=30,
+        )
+        parser.add_argument(
+            "--seed",
+            type=int,
+            default=42,
+        )
+        parser.add_argument(
+            "--batch_size",
+            type=int,
+            default=256,
+        )
+        parser.add_argument(
+            "--use_pretrained",
+            action="store_true",
+        )
+
+        return TypedArgs(**vars(parser.parse_args()))
+
+    def asdict(self):
+        return asdict(self)
+
+
+# parse args
+args = TypedArgs.parse() if not is_jupyter(globals()) else TypedArgs()
+logger.setLevel(args.log_level)
+logger.info(f"{args=}")
+training_data_dir = Path.home() / "datasets" / "WebDataset" / args.dataset_name
+
+match args.dataset_name:
+    case "CC12M":
+        dataset = CC12MDataset(training_data_dir)
+    case "CC3M":
+        dataset = CC3MDataset(training_data_dir, split="train")
+    case _:
+        raise ValueError(f"Unknown dataset name: {args.dataset_name}")
+
+PROJECT_NAME = f"{args.arch_name}-{args.dataset_name}"
+USE_WANDB_LOG = args.use_wandb_log
 
 # Torch distributed settings
 WORLD_SIZE = int(os.environ.get("WORLD_SIZE", 1))
@@ -54,8 +163,9 @@ if USE_WANDB_LOG and FIRST_RANK:
 else:
     wandb = DummyObject()
 
+TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 PROJECT_INFOMATION_DICT = dict(
-    TIMESTAMP=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    TIMESTAMP=TIMESTAMP,
     PROJECT_ROOT=PROJECT_ROOT,
     PROJECT_NAME=PROJECT_NAME,
     WORLD_SIZE=WORLD_SIZE,
@@ -94,19 +204,36 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
-change_visual_layers = change_textual_layers = [0, 1, 10, 11]
-change_visual_layers = change_textual_layers = list(range(12))
+change_visual_layers = change_textual_layers = args.training_layer_indexes
 
-model_path = PROJECT_ROOT / "models" / ARCH_NAME / PROJECT_NAME / "first.pth"
-model_path.parent.mkdir(parents=True, exist_ok=True)
-model = synn.CLIP(
-    visual_backbone=synn.VisionTransformerEncoder(
-        dropout_p=0.25,
-    ),
-    textual_backbone=synn.TextTransformerEncoder(
-        dropout_p=0.25,
-    ),
+model_path = (
+    PROJECT_ROOT / "models" / args.arch_name / PROJECT_NAME / TIMESTAMP / "first.pth"
 )
+model_path.parent.mkdir(parents=True, exist_ok=True)
+
+match args.arch_name:
+    case "CLIP512":
+        model = synn.CLIP(
+            visual_backbone=synn.VisionTransformerEncoder(
+                dropout_p=args.attn_dropout_p,
+            ),
+            textual_backbone=synn.TextTransformerEncoder(
+                dropout_p=args.attn_dropout_p,
+            ),
+        )
+
+    case "SyntaCLIP512":
+        model = synn.SyntaCLIP(
+            visual_backbone=synn.SyntacticVisionTransformerEncoder(
+                attn_dropout_p=args.attn_dropout_p,
+                gate_dropout_p=args.gate_dropout_p,
+            ),
+            textual_backbone=synn.SyntacticTextTransformerEncoder(
+                attn_dropout_p=args.attn_dropout_p,
+                gate_dropout_p=args.gate_dropout_p,
+            ),
+        )
+
 openclip_model, _, transform = open_clip.create_model_and_transforms(
     "ViT-B-32",
     pretrained="laion2b_s34b_b79k",
@@ -185,9 +312,10 @@ if not IS_DISTRIBUTED or FIRST_RANK:
     )
 
 
-# %%
 def inference(model, epoch):
-    fig_dir = PROJECT_ROOT / "ignores" / "figs" / ARCH_NAME / PROJECT_NAME / f"{epoch}"
+    fig_dir = (
+        PROJECT_ROOT / "ignores" / "figs" / args.arch_name / PROJECT_NAME / f"{epoch}"
+    )
     fig_dir.mkdir(parents=True, exist_ok=True)
     model.eval()
     urls = (
@@ -270,7 +398,6 @@ def inference(model, epoch):
     return logits_per_image, logits_per_text
 
 
-# %%
 if model is not None and IS_DISTRIBUTED and IS_CUDA_AVAILABLE:
     TORCH_STRAEM = torch.cuda.Stream()
     TORCH_STRAEM.wait_stream(torch.cuda.current_stream())
@@ -283,19 +410,16 @@ if model is not None and IS_DISTRIBUTED and IS_CUDA_AVAILABLE:
 
     logger.info(f"[{LOCAL_RANK=}] Model is DistributedDataParallel")
 
-
-CC12M_DATA_DIR = Path.home() / "datasets" / "WebDataset" / "CC12M"
-dataset = CC12MDataset(CC12M_DATA_DIR)
 if FIRST_RANK:
     dataset.download(enable_wandb=USE_WANDB_LOG)
 
 dataloader = dataset.build_dataloader(
-    batch_size=512,
+    batch_size=args.batch_size,
     num_threads=16,
     device_id=LOCAL_RANK,
     num_shards=WORLD_SIZE,
     shard_id=LOCAL_RANK,
-    seed=42 + LOCAL_RANK,
+    seed=args.seed + LOCAL_RANK,
     shuffle=True,
 )
 
@@ -304,15 +428,23 @@ scaler = torch.amp.GradScaler()
 criterion = synn.ContrastiveLoss()
 
 criterion = criterion.to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5, eta_min=5e-8)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-8
-)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+match args.scheduler:
+    case "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=5, eta_min=5e-8
+        )
+    case "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-8
+        )
+    case "none":
+        scheduler = DummyObject()
+    case _:
+        raise ValueError(f"Unknown scheduler name: {args.scheduler}")
 model.to(device)
 
-epochs = 30
-total_pbar = tqdm(range(epochs))
+total_pbar = tqdm(range(args.epochs))
 losses = []
 
 per100 = len(dataloader) // 100
@@ -348,7 +480,7 @@ for epoch in total_pbar:
             loss = (loss_img + loss_txt) / 2
 
         if loss.isnan().any():
-            logger.warning(f"Loss is NaN at epoch {epoch+1}, iteration {i+1}")
+            logger.warning(f"Loss is NaN at epoch {args.epochs+1}, iteration {i+1}")
             del loss, loss_img, loss_txt
             continue
 
@@ -358,7 +490,9 @@ for epoch in total_pbar:
 
         epoch_loss += loss.item()
 
-        epoch_pbar.set_description(f"Epoch {epoch+1}/{epochs} | Loss {loss.item():.8f}")
+        epoch_pbar.set_description(
+            f"Epoch {epoch+1}/{args.epochs} | Loss {loss.item():.8f}"
+        )
         epoch_pbar.set_postfix(
             {
                 "loss_img": f"{loss_img.item():.8f}",

@@ -22,7 +22,7 @@ from utils.initialize import initializer
 
 import syntaclip.nn as synn
 from syntaclip.utils.converter import convert_model_params_laion2b_s34b_b79k_to_CLIP512
-from syntaclip.utils.datasets.cc3m import CC3MDataset
+from syntaclip.utils.datasets.cc12m import CC12MDataset
 
 # Logger Settings
 logger = getColoredLogger(__name__)
@@ -30,7 +30,8 @@ logger = getColoredLogger(__name__)
 PROJECT_ROOT = initializer(globals(), logger=logger)
 logger.setLevel("DEBUG")
 
-PROJECT_NAME = "SyntaCLIP512-Finetune"
+ARCH_NAME = "SyntaCLIP512"
+PROJECT_NAME = f"{ARCH_NAME}-Finetune-Dropout-CC12M"
 USE_WANDB_LOG = True
 
 # Torch distributed settings
@@ -94,18 +95,19 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
 change_visual_layers = change_textual_layers = [0, 1, 10, 11]
+change_visual_layers = change_textual_layers = list(range(12))
 
-model_path = (
-    PROJECT_ROOT
-    / "models"
-    / "SyntaCLIP512"
-    / f"Origin_V{'-'.join(map(str, change_visual_layers))}_T{'-'.join(map(str, change_textual_layers))}"
-    / "first.pth"
-)
+model_path = PROJECT_ROOT / "models" / ARCH_NAME / PROJECT_NAME / "first.pth"
 model_path.parent.mkdir(parents=True, exist_ok=True)
 model = synn.CLIP(
-    visual_backbone=synn.SyntacticVisionTransformerEncoder(),
-    textual_backbone=synn.SyntacticTextTransformerEncoder(),
+    visual_backbone=synn.SyntacticVisionTransformerEncoder(
+        attn_dropout_p=0.25,
+        gate_dropout_p=0.25,
+    ),
+    textual_backbone=synn.SyntacticTextTransformerEncoder(
+        attn_dropout_p=0.25,
+        gate_dropout_p=0.25,
+    ),
 )
 openclip_model, _, transform = open_clip.create_model_and_transforms(
     "ViT-B-32",
@@ -180,14 +182,14 @@ if not IS_DISTRIBUTED or FIRST_RANK:
             input_size=[(1, 3, 224, 224), (1, 77)],
             dtypes=[torch.float32, torch.long],
             device="cpu",
-            depth=4,
+            depth=5,
         )
     )
 
 
 # %%
 def inference(model, epoch):
-    fig_dir = PROJECT_ROOT / "ignores" / "figs" / "SyntaCLIP" / f"{epoch}"
+    fig_dir = PROJECT_ROOT / "ignores" / "figs" / ARCH_NAME / PROJECT_NAME / f"{epoch}"
     fig_dir.mkdir(parents=True, exist_ok=True)
     model.eval()
     urls = (
@@ -213,10 +215,15 @@ def inference(model, epoch):
     )
     sentences = [
         "a photo of a cat",
+        "a photo of two cats",
+        "a photo of three cats",
         "a photo of a dog",
+        "a photo of two dogs",
+        "a photo of three dogs",
         "a photo of a bird",
         "a photo of a person",
     ]
+    logger.info(f"{sentences=}")
     tokens = tokenizer(sentences)
 
     images = images.to(LOCAL_RANK).to(device)
@@ -288,14 +295,14 @@ if model is not None and IS_DISTRIBUTED and IS_CUDA_AVAILABLE:
     logger.info(f"[{LOCAL_RANK=}] Model is DistributedDataParallel")
 
 
-CC3M_DATA_DIR = Path.home() / "datasets" / "WebDataset" / "CC3M"
-dataset = CC3MDataset(CC3M_DATA_DIR, split="train")
+CC12M_DATA_DIR = Path.home() / "datasets" / "WebDataset" / "CC12M"
+dataset = CC12MDataset(CC12M_DATA_DIR)
 if FIRST_RANK:
     dataset.download(enable_wandb=USE_WANDB_LOG)
 
 dataloader = dataset.build_dataloader(
     batch_size=512,
-    num_threads=8,
+    num_threads=16,
     device_id=LOCAL_RANK,
     num_shards=WORLD_SIZE,
     shard_id=LOCAL_RANK,
@@ -308,23 +315,31 @@ scaler = torch.amp.GradScaler()
 criterion = synn.ContrastiveLoss()
 
 criterion = criterion.to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    optimizer, T_max=10, eta_min=1e-9
-)
+optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5, eta_min=5e-8)
 model.to(device)
 
 epochs = 30
 total_pbar = tqdm(range(epochs))
 losses = []
 
+per100 = len(dataloader) // 100
+
 for epoch in total_pbar:
     model.train()
     epoch_pbar = tqdm(dataloader, leave=False)
     epoch_loss = 0
-    per100 = len(dataloader) // 100
-    inference_logits_per_image, _ = inference(model, epoch)
-    logger.info(f"{inference_logits_per_image=}")
+
+    if FIRST_RANK:
+        inference_logits_per_image, _ = inference(model, epoch)
+        logger.info(f"{inference_logits_per_image=}")
+        wandb.log(
+            {
+                "inference_logits_per_image": inference_logits_per_image.detach()
+                .cpu()
+                .numpy(),
+            }
+        )
 
     for i, (batch, *_) in enumerate(epoch_pbar):
         images, metadata = dataset.batch_extract(batch)
@@ -378,7 +393,9 @@ for epoch in total_pbar:
     losses.append(epoch_loss)
     torch.save(
         {
-            "model": model.state_dict(),
+            "model": model.state_dict()
+            if not IS_DISTRIBUTED
+            else model.module.state_dict(),
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "epoch": epoch,

@@ -18,6 +18,7 @@ class ResidualSyntacticAttentionEncoderLayer(ResidualAttentionEncoderLayer):
         num_gate_heads: int = 2,
         num_lookback_range: int = 3,
         tau: float = 10.0,
+        attn_dropout_p: float = 0.0,
         gate_dropout_p: float = 0.0,
         *,
         res_mlp_dim: Optional[int] = None,
@@ -35,14 +36,9 @@ class ResidualSyntacticAttentionEncoderLayer(ResidualAttentionEncoderLayer):
             embed_dim=embed_dim,
             num_attn_heads=num_attn_heads,
             num_gate_heads=num_gate_heads,
+            dropout_p=attn_dropout_p,
         )
-        self.gate = SyntacticDistanceGate(
-            embed_dim=embed_dim,
-            num_lookback_range=num_lookback_range,
-            num_gate_heads=num_attn_heads,
-            tau=tau,
-            dropout_p=gate_dropout_p,
-        )
+
 
     def forward(
         self,
@@ -57,7 +53,7 @@ class ResidualSyntacticAttentionEncoderLayer(ResidualAttentionEncoderLayer):
         _normed_query = self.layernorm_1(query)
         key = key if key is not None else _normed_query
         value = value if value is not None else _normed_query
-        attn_out, attn_weight = self.attention(
+        attn_out, attn_weights = self.attention(
             _normed_query,
             key,
             value,
@@ -67,4 +63,4 @@ class ResidualSyntacticAttentionEncoderLayer(ResidualAttentionEncoderLayer):
         )
         x = query + self.layerscale_1(attn_out)
         x = x + self.layerscale_2(self.res_mlp(self.layernorm_2(x)))
-        return x, attn_weight
+        return x, attn_weights

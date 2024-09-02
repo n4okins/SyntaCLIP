@@ -23,6 +23,8 @@ class SyntacticTransformerEncoder(nn.Module):
         num_induction_layers: int = 2,
         *,
         num_layers: int = 12,
+        attn_dropout_p: float = 0.0,
+        gate_dropout_p: float = 0.0
     ) -> None:
         super().__init__()
         self.embed_dim = embed_dim
@@ -33,7 +35,7 @@ class SyntacticTransformerEncoder(nn.Module):
             num_lookback_range=3,
             num_gate_heads=num_gate_heads,
             tau=10.0,
-            dropout_p=0.0,
+            dropout_p=gate_dropout_p,
         )
         self.res_attn_blocks = nn.ModuleList(
             [
@@ -41,6 +43,8 @@ class SyntacticTransformerEncoder(nn.Module):
                     embed_dim=embed_dim,
                     num_attn_heads=num_attn_heads,
                     num_gate_heads=num_gate_heads,
+                    attn_dropout_p=attn_dropout_p,
+                    gate_dropout_p=gate_dropout_p,
                 )
                 for _ in range(num_layers)
             ]
@@ -91,6 +95,8 @@ class SyntacticTextTransformerEncoder(TextTransformerEncoder):
         embed_dim: int = 512,
         num_attn_heads: int = 8,
         num_gate_heads: int = 8,
+        attn_dropout_p: float = 0.0,
+        gate_dropout_p: float = 0.0,
         *,
         num_layers: int = 12,
         vocab_size: int = 49408,
@@ -112,6 +118,8 @@ class SyntacticTextTransformerEncoder(TextTransformerEncoder):
             num_attn_heads=num_attn_heads,
             num_gate_heads=num_gate_heads,
             num_layers=num_layers,
+            attn_dropout_p=attn_dropout_p,
+            gate_dropout_p=gate_dropout_p,
         )
 
     def get_distance(
@@ -144,6 +152,8 @@ class SyntacticVisionTransformerEncoder(VisionTransformerEncoder):
         num_attn_heads: int = 12,
         num_gate_heads: int = 12,
         num_layers: int = 12,
+        attn_dropout_p: float = 0.0,
+        gate_dropout_p: float = 0.0,
         *,
         input_image_size: int | tuple[int, int] | tuple[int, int, int] = 224,
         patch_embed_dim: int = 768,
@@ -166,6 +176,8 @@ class SyntacticVisionTransformerEncoder(VisionTransformerEncoder):
             num_attn_heads=num_attn_heads,
             num_gate_heads=num_gate_heads,
             num_layers=num_layers,
+            attn_dropout_p=attn_dropout_p,
+            gate_dropout_p=gate_dropout_p,
         )
 
     def get_distance(

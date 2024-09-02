@@ -19,6 +19,7 @@ class TransformerEncoder(nn.Module):
         self,
         embed_dim: int = 512,
         num_heads: int = 8,
+        dropout_p: float = 0.0,
         *,
         num_layers: int = 12,
     ) -> None:
@@ -30,6 +31,7 @@ class TransformerEncoder(nn.Module):
                 ResidualAttentionEncoderLayer(
                     embed_dim=embed_dim,
                     num_heads=num_heads,
+                    dropout_p=dropout_p,
                 )
                 for _ in range(num_layers)
             ]
@@ -60,6 +62,7 @@ class TextTransformerEncoder(nn.Module):
         self,
         embed_dim: int = 512,
         num_heads: int = 8,
+        dropout_p: float = 0.0,
         *,
         num_layers: int = 12,
         vocab_size: int = 49408,
@@ -72,6 +75,7 @@ class TextTransformerEncoder(nn.Module):
             embed_dim=embed_dim,
             num_heads=num_heads,
             num_layers=num_layers,
+            dropout_p=dropout_p,
         )
         self.embed_dim = embed_dim
         self.vocab_size = vocab_size
@@ -134,18 +138,20 @@ class VisionTransformerEncoder(nn.Module):
         embed_dim: int = 512,
         num_heads: int = 12,
         num_layers: int = 12,
+        dropout_p: float = 0.0,
         *,
         input_image_size: int | tuple[int, int] | tuple[int, int, int] = 224,
         patch_embed_dim: int = 768,
         patch_size: tuple[int, int] = (32, 32),
         patch_stride: Optional[tuple[int, int]] = None,
-        patch_dropout_prob: float = 0.0,
+        patch_dropout_prob: float = 0.2,
     ) -> None:
         super().__init__()
         self.transformer = TransformerEncoder(
             embed_dim=patch_embed_dim,
             num_heads=num_heads,
             num_layers=num_layers,
+            dropout_p=dropout_p,
         )
         self.embed_dim = embed_dim
         self.patch_embed_dim = patch_embed_dim

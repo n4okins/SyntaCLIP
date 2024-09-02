@@ -18,3 +18,4 @@ models/
 *.out
 *.log
 .env
+main.py
