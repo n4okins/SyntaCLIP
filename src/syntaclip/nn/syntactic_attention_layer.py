@@ -38,7 +38,13 @@ class ResidualSyntacticAttentionEncoderLayer(ResidualAttentionEncoderLayer):
             num_gate_heads=num_gate_heads,
             dropout_p=attn_dropout_p,
         )
-
+        self.gate = SyntacticDistanceGate(
+            embed_dim=embed_dim,
+            num_lookback_range=num_lookback_range,
+            num_gate_heads=num_gate_heads,
+            tau=tau,
+            dropout_p=gate_dropout_p,
+        )
 
     def forward(
         self,

@@ -30,7 +30,7 @@ logger = getColoredLogger(__name__)
 PROJECT_ROOT = initializer(globals(), logger=logger)
 logger.setLevel("DEBUG")
 
-ARCH_NAME = "CLIP512"
+ARCH_NAME = "SyntaCLIP512"
 PROJECT_NAME = f"{ARCH_NAME}-Visualize"
 USE_WANDB_LOG = False
 
@@ -190,18 +190,23 @@ transform = transforms.Compose(
     ]
 )
 num_samples = 10
+
 seed = 0
 random.seed(seed)
+
 samples: list[COCOImageAndCaption] = random.sample(image_and_captions, num_samples)
 images = torch.stack([transform(sample.load_image()) for sample in samples])
 sentences = [sample.caption for sample in samples]
 tokens = tokenizer(sentences)
-images = images.to(LOCAL_RANK).to(device)
-tokens = tokens.to(LOCAL_RANK).to(device)
+images = images.to(device)
+tokens = tokens.to(device)
+if IS_CUDA_AVAILABLE:
+    images, tokens = images.to(LOCAL_RANK), tokens.to(LOCAL_RANK)
+
 model = model.to(device)
 images_distances, tokens_distances = None, None
 with torch.inference_mode(), torch.amp.autocast(
-    device_type="cuda", dtype=torch.float32
+    device_type=device.type, dtype=torch.float32
 ):
     if hasattr(model.visual, "get_distance"):
         if IS_DISTRIBUTED:
@@ -241,177 +246,214 @@ for i in tqdm(range(num_samples)):  # [batch_size, 77, 1]
     if images_distances is not None and tokens_distances is not None:
         # TOKEN DISTANCE
         token_distance = tokens_distances[i].squeeze(1)  # [77]
-        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-        ax.set_ylim(-1, 1)
-        ax.bar(
-            range(len(_tokens)), token_distance[: end_index + 1].cpu().detach().numpy()
+        fig, ax = plt.subplots(
+            1,
+            1,
+            figsize=(6, 4),
+            dpi=300,
         )
+        ax.bar(
+            range(len(_tokens)),
+            (token_distance[: end_index + 1]).cpu().detach().numpy(),
+            width=0.5,
+        )
+        token_distance_gt = token_distance[:-1] > token_distance[1:]
+        ax.vlines(
+            [y + 0.5 for y in token_distance_gt[:end_index].argwhere().flatten()],
+            -1,
+            1,
+            color="red",
+        )
+        ax.set_ylim(-1, 1)
+        ax.grid(True)
         ax.set_xticks(range(len(_tokens)))
         ax.set_xticklabels(
-            [tokenizer.decoder[token].replace("</w>", " ") for token in _tokens],
+            decoded_tokens[: end_index + 1],
             rotation=90,
         )
-        ax.grid(True)
         fig.tight_layout()
         fig.savefig(caption_dir / "token_distance.png")
         fig.clear()
         plt.close(fig)
 
         # TOKEN DISTANCE
-        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-        ax.set_ylim(-1, 1)
-        ax.bar(
-            range(77), token_distance.cpu().detach().numpy()
+        fig, ax = plt.subplots(
+            1,
+            1,
+            figsize=(6, 4),
+            dpi=300,
         )
-        ax.set_xticks(range(77))
-        ax.set_xticklabels(
-            [tokenizer.decoder[token].replace("</w>", " ") for token in _tokens]
-            + [" "] * (77 - len(_tokens)),
-            rotation=90,
-        )
-        ax.grid(True)
-        fig.tight_layout()
-        fig.savefig(caption_dir / "all_token_distance.png")
-        fig.clear()
-        plt.close(fig)
-
-        # ABS TOKEN DISTANCE
-        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-        ax.set_ylim(-0.05, 1)
         ax.bar(
             range(len(_tokens)),
-            token_distance[: end_index + 1].abs().cpu().detach().numpy(),
+            (token_distance[: end_index + 1]).cpu().detach().numpy(),
+            width=0.5,
         )
+        ax.vlines(
+            [y + 0.5 for y in token_distance_gt[:end_index].argwhere().flatten()],
+            -1,
+            1,
+            color="red",
+        )
+        ax.set_ylim(-0.1, 0.1)
+        ax.grid(True)
         ax.set_xticks(range(len(_tokens)))
         ax.set_xticklabels(
-            [tokenizer.decoder[token].replace("</w>", " ") for token in _tokens],
+            decoded_tokens[: end_index + 1],
             rotation=90,
         )
-        ax.grid(True)
         fig.tight_layout()
-        fig.savefig(caption_dir / "token_distance_abs.png")
+        fig.savefig(caption_dir / "token_distance_zoom.png")
         fig.clear()
         plt.close(fig)
-
-        # TOKEN DISTANCE
-        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-        ax.set_ylim(-1, 1)
-        ax.bar(
-            range(77), token_distance.abs().cpu().detach().numpy()
-        )
-        ax.set_xticks(range(len(_tokens)))
-        ax.set_xticklabels(
-            [tokenizer.decoder[token].replace("</w>", " ") for token in _tokens],
-            rotation=90,
-        )
-        ax.grid(True)
-        fig.tight_layout()
-        fig.savefig(caption_dir / "all_token_distance_abs.png")
-        fig.clear()
-        plt.close(fig)
-
 
         # IMAGE DISTANCE
         image_distance = images_distances[i].squeeze(1)  # [50]
-        fig, ax = plt.subplots(1, 1, figsize=(14, 5))
-        ax.set_ylim(-1, 1)
+        fig, ax = plt.subplots(1, 1, figsize=(12, 3), dpi=300)
         ax.set_xticks(range(len(image_distance)))
         ax.set_xticklabels(
             ["CLS_TOKEN"] + [f"Patch-{i}" for i in range(len(image_distance) - 1)],
             rotation=90,
         )
-        ax.bar(range(len(image_distance)), image_distance.cpu().detach().numpy())
+        ax.bar(
+            range(len(image_distance)),
+            (image_distance).cpu().detach().numpy(),
+            width=0.5,
+        )
+
+        image_distance_sign = image_distance[:-1] > image_distance[1:]
+        ax.vlines(
+            [y + 0.5 for y in image_distance_sign.argwhere().flatten()],
+            -1,
+            1,
+            color="red",
+        )
+        ax.tick_params(left=False, labelleft=False)
+        ax.set_ylim(-0.3, 0.1)
+        ax.set_xlim(-0.5, 49.5)
         ax.grid(True)
         fig.tight_layout()
         fig.savefig(caption_dir / "image_distance.png")
         fig.clear()
         plt.close(fig)
 
-        # ABS IMAGE DISTANCE
-        fig, ax = plt.subplots(1, 1, figsize=(14, 5))
-        ax.set_ylim(-0.05, 1)
-        ax.set_xticks(range(len(image_distance)))
-        ax.set_xticklabels(
-            ["CLS_TOKEN"] + [f"Patch-{i}" for i in range(len(image_distance) - 1)],
-            rotation=90,
+        # 3D BAR PLOT
+        fig = plt.figure(figsize=(8, 8), dpi=300)
+        ax = fig.add_subplot(111, projection="3d")
+        data = image_distance[1:]
+        width = depth = 1
+        bottom = torch.zeros_like(data)
+        _x = torch.arange(7)
+        _y = torch.arange(7)
+        _xx, _yy = torch.meshgrid(_x, _y, indexing="ij")
+        x, y = _xx.ravel(), _yy.ravel()
+        ax.bar3d(
+            y,
+            x,
+            bottom,
+            dx=0.5,
+            dy=0.5,
+            dz=data.T.relu(),
+            shade=True,
+            alpha=0.5,
+            color="r",
+            label="$z >= 0$",
         )
-        ax.bar(range(len(image_distance)), image_distance.abs().cpu().detach().numpy())
-        ax.grid(True)
-        fig.tight_layout()
-        fig.savefig(caption_dir / "image_distance_abs.png")
+        ax.bar3d(
+            y,
+            x,
+            bottom,
+            dx=0.5,
+            dy=0.5,
+            dz=-(-data.T).relu(),
+            shade=True,
+            alpha=0.5,
+            color="b",
+            label="$z < 0$",
+        )
+        ax.set_zlabel("image syntactic distance")
+        ax.view_init(elev=45, azim=-60)
+        ax.legend()
+        ax.set_zlim(-0.5, 0.5)
+        ax.invert_yaxis()
+        ax.set_xticks(range(7))
+        ax.set_xticklabels([f"Patch-{i}" for i in range(7)])
+        ax.set_yticks(range(7))
+        ax.set_yticklabels([f"Patch-{i}" for i in range(0, 49, 7)])
+        ax.set_zticks([-0.5, 0, 0.5])
+        fig.savefig(caption_dir / "image_distance_3d.png")
         fig.clear()
         plt.close(fig)
 
-    # TOKEN WEIGHTS
-    for j in range(12):
-        fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-        token_weights = tokens_weights[i]
-        ax.imshow(token_weights[j].cpu().detach().numpy(), cmap="viridis", alpha=0.8)
-        ax.set_yticks(range(len(decoded_tokens)))
-        ax.set_yticklabels(
-            decoded_tokens,
-        )
-        ax.set_xticks(range(len(decoded_tokens)))
-        ax.set_xticklabels(
-            decoded_tokens,
-            rotation=90,
-        )
-        ax.set_title(f"Token Attention-{j}")
-        ax.grid(linewidth=0.5, linestyle="--")
-        ax.xaxis.tick_top()
-        fig.tight_layout()
-        fig.savefig(caption_dir / f"all_token_weights_{j:02d}.png")
+    # # TOKEN WEIGHTS
+    # for j in range(12):
+    #     fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    #     token_weights = tokens_weights[i]
+    #     ax.imshow(token_weights[j].cpu().detach().numpy(), cmap="viridis", alpha=0.8)
+    #     ax.set_yticks(range(len(decoded_tokens)))
+    #     ax.set_yticklabels(
+    #         decoded_tokens,
+    #     )
+    #     ax.set_xticks(range(len(decoded_tokens)))
+    #     ax.set_xticklabels(
+    #         decoded_tokens,
+    #         rotation=90,
+    #     )
+    #     ax.set_title(f"Token Attention-{j}")
+    #     ax.grid(linewidth=0.5, linestyle="--")
+    #     ax.xaxis.tick_top()
+    #     fig.tight_layout()
+    #     fig.savefig(caption_dir / f"all_token_weights_{j:02d}.png")
 
-        fig.clear()
-        plt.close(fig)
+    #     fig.clear()
+    #     plt.close(fig)
 
-    for j in range(12):
-        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-        token_weights = tokens_weights[i]
-        ax.imshow(
-            token_weights[j][: end_index + 1, : end_index + 1].cpu().detach().numpy(),
-            cmap="viridis",
-            alpha=0.8,
-        )
-        ax.set_yticks(range(end_index + 1))
-        ax.set_yticklabels(
-            decoded_tokens[: end_index + 1],
-        )
-        ax.set_xticks(range(end_index + 1))
-        ax.set_xticklabels(
-            decoded_tokens[: end_index + 1],
-            rotation=90,
-        )
-        ax.set_title(f"Token Attention-{j}")
-        ax.grid(linewidth=0.5, linestyle="--")
-        ax.xaxis.tick_top()
-        fig.tight_layout()
-        fig.savefig(caption_dir / f"token_weights_{j:02d}.png")
+    # for j in range(12):
+    #     fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+    #     token_weights = tokens_weights[i]
+    #     ax.imshow(
+    #         token_weights[j][: end_index + 1, : end_index + 1].cpu().detach().numpy(),
+    #         cmap="viridis",
+    #         alpha=0.8,
+    #     )
+    #     ax.set_yticks(range(end_index + 1))
+    #     ax.set_yticklabels(
+    #         decoded_tokens[: end_index + 1],
+    #     )
+    #     ax.set_xticks(range(end_index + 1))
+    #     ax.set_xticklabels(
+    #         decoded_tokens[: end_index + 1],
+    #         rotation=90,
+    #     )
+    #     ax.set_title(f"Token Attention-{j}")
+    #     ax.grid(linewidth=0.5, linestyle="--")
+    #     ax.xaxis.tick_top()
+    #     fig.tight_layout()
+    #     fig.savefig(caption_dir / f"token_weights_{j:02d}.png")
 
-        fig.clear()
-        plt.close(fig)
+    #     fig.clear()
+    #     plt.close(fig)
 
-    # IMAGE WEIGHTS
-    for j in range(12):
-        fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-        image_weights = images_weights[i]
-        ax.imshow(image_weights[j].cpu().detach().numpy(), cmap="viridis")
-        ax.set_xticks(range(50))
-        ax.set_xticklabels(
-            ["CLS_TOKEN"] + [f"Patch-{i}" for i in range(50 - 1)],
-            rotation=90,
-        )
-        ax.set_yticks(range(50))
-        ax.set_yticklabels(
-            ["CLS_TOKEN"] + [f"Patch-{i}" for i in range(50 - 1)],
-        )
-        ax.set_title(f"Image Attention-{j}")
-        ax.grid(linewidth=0.5, linestyle="--")
-        ax.xaxis.tick_top()
-        fig.tight_layout()
-        fig.savefig(caption_dir / f"image_weights_{j:02d}.png")
-        fig.clear()
-        plt.close(fig)
+    # # IMAGE WEIGHTS
+    # for j in range(12):
+    #     fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    #     image_weights = images_weights[i]
+    #     ax.imshow(image_weights[j].cpu().detach().numpy(), cmap="viridis")
+    #     ax.set_xticks(range(50))
+    #     ax.set_xticklabels(
+    #         ["CLS_TOKEN"] + [f"Patch-{i}" for i in range(50 - 1)],
+    #         rotation=90,
+    #     )
+    #     ax.set_yticks(range(50))
+    #     ax.set_yticklabels(
+    #         ["CLS_TOKEN"] + [f"Patch-{i}" for i in range(50 - 1)],
+    #     )
+    #     ax.set_title(f"Image Attention-{j}")
+    #     ax.grid(linewidth=0.5, linestyle="--")
+    #     ax.xaxis.tick_top()
+    #     fig.tight_layout()
+    #     fig.savefig(caption_dir / f"image_weights_{j:02d}.png")
+    #     fig.clear()
+    #     plt.close(fig)
 
     # IMAGE
     patch = (
@@ -431,11 +473,19 @@ for i in tqdm(range(num_samples)):  # [batch_size, 77, 1]
                 (8 + pl * 34, 8 + pr * 34), str(pr * 7 + pl), fill=(255, 20, 20)
             )
 
-    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12), dpi=300)
     ax.imshow(img)
     ax.axis("off")
     fig.tight_layout()
     fig.savefig(caption_dir / "image.png")
+    fig.clear()
+    plt.close(fig)
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12), dpi=300)
+    ax.imshow(images[i].permute(1, 2, 0).cpu().detach().numpy())
+    ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(caption_dir / "original_image.png")
     fig.clear()
     plt.close(fig)
 

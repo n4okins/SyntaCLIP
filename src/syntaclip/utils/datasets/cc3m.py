@@ -7,6 +7,7 @@ from typing import Any, Callable, Literal, Optional
 import img2dataset
 import nvidia.dali.fn as fn
 import nvidia.dali.types as types
+import torch
 from nvidia.dali import Pipeline, pipeline_def
 from nvidia.dali.data_node import DataNode
 from nvidia.dali.plugin.pytorch import DALIGenericIterator, LastBatchPolicy
@@ -92,7 +93,9 @@ class CC3MDataset(DaliDataset):
         ext: list[str] = ["jpg", "json"],
         shuffle: bool = False,
         image_size: int | tuple[int, int] = 224,
-        device: Literal["cpu", "gpu", "mixed"] = "gpu",
+        device: Literal["cpu", "gpu", "mixed"] = "gpu"
+        if torch.cuda.is_available()
+        else "cpu",
         name: str = "CC3MReader",
         normalize: bool = False,
         *,
@@ -187,7 +190,9 @@ class CC3MDataset(DaliDataset):
         ext: list[str] = ["jpg", "json"],
         random_shuffle: bool = True,
         image_size: int | tuple[int, int] = 224,
-        device: Literal["cpu", "gpu", "mixed"] = "gpu",
+        device: Literal["cpu", "gpu", "mixed"] = "gpu"
+        if torch.cuda.is_available()
+        else "cpu",
         name: str = "CC3MReader",
         num_shards: int = 1,
         shard_id: int = 0,
@@ -212,7 +217,7 @@ class CC3MDataset(DaliDataset):
                 shard_id=shard_id,
                 seed=seed,
             )
-            image = fn.decoders.image(image, device="mixed", output_type=types.RGB)
+            image = fn.decoders.image(image, device="mixed" if torch.cuda.is_available() else "cpu", output_type=types.RGB)
             image = (
                 fn.resize(
                     image,

@@ -46,8 +46,10 @@ class TypedArgs:
     scheduler: Literal["none", "cosine", "plateau"] = "plateau"
     epochs: int = 30
     seed: int = 42
-    batch_size: int = 256
+    batch_size: int = 512
     use_pretrained: bool = True
+    insert_induction_layer_num_visual: list[int] = field(default_factory=lambda: [2])
+    insert_induction_layer_num_textual: list[int] = field(default_factory=lambda: [2])
 
     @staticmethod
     def parse() -> "TypedArgs":
@@ -77,7 +79,7 @@ class TypedArgs:
         parser.add_argument(
             "--training_layer_indexes",
             type=lambda x: list(map(int, x.split(","))),
-            default=[0, 1, 10, 11],
+            default=[0, 1, 2, 9, 10, 11],
         )
         parser.add_argument(
             "--attn_dropout_p",
@@ -113,11 +115,21 @@ class TypedArgs:
         parser.add_argument(
             "--batch_size",
             type=int,
-            default=256,
+            default=512,
         )
         parser.add_argument(
             "--use_pretrained",
             action="store_true",
+        )
+        parser.add_argument(
+            "--insert_induction_layer_num_visual",
+            type=lambda x: list(map(int, x.split(","))),
+            default=[2],
+        )
+        parser.add_argument(
+            "--insert_induction_layer_num_textual",
+            type=lambda x: list(map(int, x.split(","))),
+            default=[2],
         )
 
         return TypedArgs(**vars(parser.parse_args()))
@@ -130,6 +142,7 @@ class TypedArgs:
 args = TypedArgs.parse() if not is_jupyter(globals()) else TypedArgs()
 logger.setLevel(args.log_level)
 logger.info(f"{args=}")
+
 training_data_dir = Path.home() / "datasets" / "WebDataset" / args.dataset_name
 
 match args.dataset_name:
@@ -150,6 +163,7 @@ IS_DISTRIBUTED = WORLD_SIZE > 1
 IS_CUDA_AVAILABLE = torch.cuda.is_available()
 
 if IS_DISTRIBUTED:
+    assert IS_CUDA_AVAILABLE, "Distributed training requires CUDA available"
     torch.distributed.init_process_group(backend="nccl", init_method="env://")
     WORLD_SIZE = torch.cuda.device_count()
     torch.cuda.set_device(LOCAL_RANK)
@@ -201,13 +215,19 @@ once_logger_info("=" * 16 + " Project Information End " + "=" * 16)
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+amp_device_type = device.type
+amp_dtype = torch.float32 if device.type == "cuda" else torch.float16
 tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
 change_visual_layers = change_textual_layers = args.training_layer_indexes
 
 model_path = (
-    PROJECT_ROOT / "models" / args.arch_name / PROJECT_NAME / TIMESTAMP / "first.pth"
+    PROJECT_ROOT
+    / "models"
+    / args.arch_name
+    / PROJECT_NAME
+    / TIMESTAMP
+    / "before_training.pth"
 )
 model_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -223,14 +243,16 @@ match args.arch_name:
         )
 
     case "SyntaCLIP512":
-        model = synn.SyntaCLIP(
+        model = synn.CLIP(
             visual_backbone=synn.SyntacticVisionTransformerEncoder(
                 attn_dropout_p=args.attn_dropout_p,
                 gate_dropout_p=args.gate_dropout_p,
+                insert_induction_layer_num=args.insert_induction_layer_num_visual,
             ),
             textual_backbone=synn.SyntacticTextTransformerEncoder(
                 attn_dropout_p=args.attn_dropout_p,
                 gate_dropout_p=args.gate_dropout_p,
+                insert_induction_layer_num=args.insert_induction_layer_num_textual,
             ),
         )
 
@@ -242,9 +264,8 @@ openclip_model, _, transform = open_clip.create_model_and_transforms(
 
 wandb.config.update(
     {
-        "change_visual_layers": change_visual_layers,
-        "change_textual_layers": change_textual_layers,
         "model_path": str(model_path),
+        "args": args.asdict(),
     }
 )
 
@@ -352,12 +373,13 @@ def inference(model, epoch):
     logger.info(f"{sentences=}")
     tokens = tokenizer(sentences)
 
-    images = images.to(LOCAL_RANK).to(device)
-    tokens = tokens.to(LOCAL_RANK).to(device)
+    images = images.to(device)
+    tokens = tokens.to(device)
     model = model.to(device)
     if IS_DISTRIBUTED:
+        images, tokens = images.to(LOCAL_RANK), tokens.to(LOCAL_RANK)
         with torch.inference_mode(), torch.amp.autocast(
-            device_type="cuda", dtype=torch.float32
+            device_type=amp_device_type, dtype=amp_dtype
         ):
             images_feats, images_weights = model.module.visual(
                 images, return_all_weights=True
@@ -368,7 +390,8 @@ def inference(model, epoch):
             logits_per_image, logits_per_text = model(images, tokens)
     else:
         with torch.inference_mode(), torch.amp.autocast(
-            device_type="cuda", dtype=torch.float32
+            device_type=device.type,
+            dtype=torch.float32 if device.type == "cuda" else torch.float16,
         ):
             images_feats, images_weights = model.visual(images, return_all_weights=True)
             tokens_feats, tokens_weights = model.textual(
@@ -416,7 +439,7 @@ if FIRST_RANK:
 dataloader = dataset.build_dataloader(
     batch_size=args.batch_size,
     num_threads=16,
-    device_id=LOCAL_RANK,
+    device_id=LOCAL_RANK if IS_CUDA_AVAILABLE else None,
     num_shards=WORLD_SIZE,
     shard_id=LOCAL_RANK,
     seed=args.seed + LOCAL_RANK,
@@ -447,6 +470,14 @@ model.to(device)
 total_pbar = tqdm(range(args.epochs))
 losses = []
 
+
+logger.info("Start Training")
+logger.info(f"{args.epochs=}")
+logger.info(f"{args.batch_size=}")
+logger.info(f"{args.learning_rate=}")
+logger.info(f"{args.training_layer_indexes=}")
+logger.info(f"{scheduler=}")
+
 per100 = len(dataloader) // 100
 
 for epoch in total_pbar:
@@ -468,14 +499,14 @@ for epoch in total_pbar:
     for i, (batch, *_) in enumerate(epoch_pbar):
         images, metadata = dataset.batch_extract(batch)
         captions = [datum["caption"] for datum in metadata]
-        texts = tokenizer(captions)
+        tokens = tokenizer(captions)
 
-        images = images.to(LOCAL_RANK)
-        texts = texts.to(LOCAL_RANK)
+        if IS_DISTRIBUTED:
+            images, tokens = images.to(LOCAL_RANK), tokens.to(LOCAL_RANK)
 
         optimizer.zero_grad()
-        with torch.amp.autocast(device_type="cuda", dtype=torch.float32):
-            logits_per_image, logits_per_text = model(images, texts)
+        with torch.amp.autocast(device_type=amp_device_type, dtype=amp_dtype):
+            logits_per_image, logits_per_text = model(images, tokens)
             loss_img, loss_txt = criterion(logits_per_image, logits_per_text)
             loss = (loss_img + loss_txt) / 2
 
@@ -534,7 +565,11 @@ for epoch in total_pbar:
         },
         model_path.with_name(f"checkpoint_{epoch:02d}.pth"),
     )
-    scheduler.step()
+    if args.scheduler != "none":
+        if args.scheduler == "plateau":
+            scheduler.step(epoch_loss)
+        else:
+            scheduler.step()
 
 wandb.finish()
 # %%
