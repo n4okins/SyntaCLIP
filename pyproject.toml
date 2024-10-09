@@ -13,6 +13,11 @@ dependencies = [
     "matplotlib>=3.9.2",
     "nvidia-dali-cuda120>=1.40.0",
     "nvidia-nvjpeg2k-cu12>=0.8.0.38",
+    "polars>=1.9.0",
+    "typed-argument-parser>=1.10.1",
+    "albumentations>=1.4.17",
+    "tiktoken>=0.8.0",
+    "pot[backend-torch,cvxopt,dr,gnn]>=0.9.4",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"

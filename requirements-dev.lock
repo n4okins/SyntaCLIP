@@ -9,10 +9,17 @@
 #   generate-hashes: false
 
 -e file:.
-albucore==0.0.13
+aiohappyeyeballs==2.4.3
+    # via aiohttp
+aiohttp==3.10.9
+    # via torch-geometric
+aiosignal==1.3.1
+    # via aiohttp
+albucore==0.0.17
     # via albumentations
-albumentations==1.4.14
+albumentations==1.4.17
     # via img2dataset
+    # via syntaclip
 annotated-types==0.7.0
     # via pydantic
 antlr4-python3-runtime==4.9.3
@@ -36,8 +43,11 @@ astunparse==1.6.3
 async-lru==2.0.4
     # via jupyterlab
 attrs==24.2.0
+    # via aiohttp
     # via jsonschema
     # via referencing
+autograd==1.7.0
+    # via pot
 babel==2.16.0
     # via jupyterlab-server
 beautifulsoup4==4.12.3
@@ -62,6 +72,8 @@ comm==0.2.2
     # via ipywidgets
 contourpy==1.2.1
     # via matplotlib
+cvxopt==1.3.2
+    # via pot
 cycler==0.12.1
     # via matplotlib
 dataclasses==0.6
@@ -76,12 +88,10 @@ dm-tree==0.1.8
     # via nvidia-dali-cuda120
 docker-pycreds==0.4.0
     # via wandb
+docstring-parser==0.16
+    # via typed-argument-parser
 eval-type-backport==0.2.0
     # via albumentations
-exceptiongroup==1.2.2
-    # via anyio
-    # via ipython
-    # via pytest
 executing==2.0.1
     # via stack-data
 exifread-nocycle==3.0.1
@@ -99,10 +109,14 @@ fonttools==4.53.1
     # via matplotlib
 fqdn==1.5.1
     # via jsonschema
+frozenlist==1.4.1
+    # via aiohttp
+    # via aiosignal
 fsspec==2024.2.0
     # via huggingface-hub
     # via img2dataset
     # via torch
+    # via torch-geometric
 ftfy==6.2.3
     # via open-clip-torch
 gast==0.6.0
@@ -128,6 +142,7 @@ idna==3.4
     # via httpx
     # via jsonschema
     # via requests
+    # via yarl
 imageio==2.35.1
     # via scikit-image
 img2dataset==1.45.0
@@ -149,6 +164,9 @@ jinja2==3.1.3
     # via jupyterlab-server
     # via nbconvert
     # via torch
+    # via torch-geometric
+joblib==1.4.2
+    # via scikit-learn
 json5==0.9.25
     # via jupyterlab-server
 jsonpointer==3.0.0
@@ -205,9 +223,13 @@ mistune==3.0.2
     # via nbconvert
 mpmath==1.3.0
     # via sympy
+multidict==6.1.0
+    # via aiohttp
+    # via yarl
 mypy==1.11.2
 mypy-extensions==1.0.0
     # via mypy
+    # via typing-inspect
 nbclient==0.10.0
     # via nbconvert
 nbconvert==7.16.4
@@ -226,15 +248,20 @@ notebook-shim==0.2.4
 numpy==1.26.3
     # via albucore
     # via albumentations
+    # via autograd
     # via contourpy
     # via imageio
     # via matplotlib
     # via opencv-python-headless
     # via pandas
+    # via pot
     # via pyarrow
+    # via pymanopt
     # via scikit-image
+    # via scikit-learn
     # via scipy
     # via tifffile
+    # via torch-geometric
     # via torchvision
     # via transformers
     # via webdataset
@@ -294,6 +321,7 @@ packaging==22.0
     # via pytest
     # via scikit-image
     # via transformers
+    # via typed-argument-parser
 pandas==2.2.2
     # via img2dataset
 pandocfilters==1.5.1
@@ -311,14 +339,21 @@ platformdirs==4.2.2
     # via jupyter-core
 pluggy==1.5.0
     # via pytest
+polars==1.9.0
+    # via syntaclip
+pot==0.9.4
+    # via syntaclip
 prometheus-client==0.20.0
     # via jupyter-server
 prompt-toolkit==3.0.47
     # via ipython
+propcache==0.2.0
+    # via yarl
 protobuf==4.25.4
     # via wandb
 psutil==6.0.0
     # via ipykernel
+    # via torch-geometric
     # via wandb
 ptyprocess==0.7.0
     # via pexpect
@@ -337,8 +372,11 @@ pydantic-core==2.20.1
 pygments==2.18.0
     # via ipython
     # via nbconvert
+pymanopt==2.2.1
+    # via pot
 pyparsing==3.1.3
     # via matplotlib
+    # via torch-geometric
 pytest==8.3.2
 python-dateutil==2.9.0.post0
     # via arrow
@@ -370,10 +408,13 @@ referencing==0.35.1
     # via jupyter-events
 regex==2024.7.24
     # via open-clip-torch
+    # via tiktoken
     # via transformers
 requests==2.28.1
     # via huggingface-hub
     # via jupyterlab-server
+    # via tiktoken
+    # via torch-geometric
     # via transformers
     # via wandb
 rfc3339-validator==0.1.4
@@ -391,9 +432,14 @@ safetensors==0.4.4
     # via transformers
 scikit-image==0.24.0
     # via albumentations
+scikit-learn==1.5.2
+    # via pot
 scipy==1.14.1
     # via albumentations
+    # via pot
+    # via pymanopt
     # via scikit-image
+    # via scikit-learn
 send2trash==1.8.3
     # via jupyter-server
 sentry-sdk==2.13.0
@@ -426,24 +472,26 @@ termcolor==2.4.0
 terminado==0.18.1
     # via jupyter-server
     # via jupyter-server-terminals
+threadpoolctl==3.5.0
+    # via scikit-learn
 tifffile==2024.8.10
     # via scikit-image
+tiktoken==0.8.0
+    # via syntaclip
 timm==1.0.9
     # via open-clip-torch
 tinycss2==1.3.0
     # via nbconvert
 tokenizers==0.19.1
     # via transformers
-tomli==2.0.1
-    # via albucore
-    # via jupyterlab
-    # via mypy
-    # via pytest
 torch==2.4.0+cu121
     # via open-clip-torch
+    # via pot
     # via syntaclip
     # via timm
     # via torchvision
+torch-geometric==2.6.1
+    # via pot
 torchinfo==1.8.0
     # via syntaclip
 torchvision==0.19.0+cu121
@@ -460,6 +508,7 @@ tqdm==4.64.1
     # via huggingface-hub
     # via img2dataset
     # via open-clip-torch
+    # via torch-geometric
     # via transformers
 traitlets==5.14.3
     # via comm
@@ -479,19 +528,20 @@ transformers==4.44.2
     # via syntaclip
 triton==3.0.0
     # via torch
+typed-argument-parser==1.10.1
+    # via syntaclip
 types-python-dateutil==2.9.0.20240821
     # via arrow
 typing-extensions==4.9.0
-    # via albucore
-    # via albumentations
-    # via anyio
-    # via async-lru
     # via huggingface-hub
     # via ipython
     # via mypy
     # via pydantic
     # via pydantic-core
     # via torch
+    # via typing-inspect
+typing-inspect==0.9.0
+    # via typed-argument-parser
 tzdata==2024.1
     # via pandas
 uri-template==1.3.0
@@ -518,3 +568,5 @@ wheel==0.44.0
     # via astunparse
 widgetsnbextension==4.0.13
     # via ipywidgets
+yarl==1.14.0
+    # via aiohttp
